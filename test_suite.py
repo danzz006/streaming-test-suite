@@ -58,12 +58,14 @@ def subtitle_formatter(response, format):
 
 
 # Used for microphone streaming only.
-def mic_callback(input_data, frame_count, time_info, status_flag):
-    audio_queue.put_nowait(input_data)
-    return (input_data, pyaudio.paContinue)
+# def mic_callback(input_data, frame_count, time_info, status_flag):
+#     audio_queue.put_nowait(input_data)
+#     return (input_data, pyaudio.paContinue)
 
 
 async def run(key, method, format, **kwargs):
+    audio_queue = asyncio.Queue()
+    
     deepgram_url = f'{kwargs["host"]}/v1/listen?punctuate=true'
 
     if kwargs["model"]:
@@ -150,7 +152,11 @@ async def run(key, method, format, **kwargs):
                     raise e
 
             return
-
+        
+        def mic_callback(input_data, frame_count, time_info, status_flag):
+            audio_queue.put_nowait(input_data)
+            return (input_data, pyaudio.paContinue)
+        
         async def receiver(ws):
             """Print out the messages received from the server."""
             first_message = True
@@ -259,7 +265,11 @@ async def run(key, method, format, **kwargs):
             SAMPLE_SIZE = audio.get_sample_size(FORMAT)
 
             while stream.is_active():
+            # for i in range(0, int(RATE / CHUNK * 2)):
                 await asyncio.sleep(0.1)
+                # data = stream.read(CHUNK)
+                # audio_queue.put_nowait(data)
+            #     pass
 
             stream.stop_stream()
             stream.close()
@@ -324,7 +334,7 @@ def parse_args():
         description="Submits data to the real-time streaming endpoint."
     )
     parser.add_argument(
-        "-k", "--key", required=True, help="YOUR_DEEPGRAM_API_KEY (authorization)"
+        "-k", "--key", default="ce59447b06053a5966b5178374e733d586f210ef",help="YOUR_DEEPGRAM_API_KEY (authorization)"
     )
     parser.add_argument(
         "-i",
@@ -332,7 +342,9 @@ def parse_args():
         help='Input to stream to Deepgram. Can be "mic" to stream from your microphone (requires pyaudio), the path to a WAV file, or the URL to a direct audio stream. Defaults to the included file preamble.wav',
         nargs="?",
         const=1,
-        default="preamble.wav",
+        # default=r"D:\Python\Amir Saleem\deepgram\streaming-test-suite\preamble.wav",
+        # default=r"http://stream.live.vc.bbcmedia.co.uk/bbc_world_service",
+        default=r"mic",
         type=validate_input,
     )
     parser.add_argument(
