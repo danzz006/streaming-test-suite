@@ -7,20 +7,32 @@ import os
 import sys
 import wave
 import websockets
-
+import streamlit as st
+import time
+import threading
+from threading import Thread
 from datetime import datetime
+try:
+    # Streamlit >= 1.12.0
+    from streamlit.runtime.scriptrunner import add_script_run_ctx
+    from streamlit.runtime.scriptrunner.script_run_context import get_script_run_ctx
+except:
+    # Streamlit <= 1.11.0
+    from streamlit.scriptrunner import add_script_run_ctx
+    from streamlit.scriptrunner.script_run_context import get_script_run_ctx
+
 
 startTime = datetime.now()
 
 all_mic_data = []
-all_transcripts = []
-
+all_transcripts = ['starting...']
+threads = []
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 16000
 CHUNK = 8000
 
-audio_queue = asyncio.Queue()
+st.title('Speech Recognition')
 
 # Mimic sending a real-time stream by sending this many seconds of audio at a time.
 # Used for file "streaming" only.
@@ -65,9 +77,8 @@ def subtitle_formatter(response, format):
 
 async def run(key, method, format, **kwargs):
     audio_queue = asyncio.Queue()
-    
     deepgram_url = f'{kwargs["host"]}/v1/listen?punctuate=true'
-
+    
     if kwargs["model"]:
         deepgram_url += f"&model={kwargs['model']}"
 
@@ -100,6 +111,10 @@ async def run(key, method, format, **kwargs):
             if method == "mic":
                 try:
                     while True:
+                        if threading.current_thread().stopped(): 
+                            print("----------------- Called stopped -----------------")
+                            ws.close()
+                            raise Exception("Ending...")
                         mic_data = await audio_queue.get()
                         all_mic_data.append(mic_data)
                         await ws.send(mic_data)
@@ -118,6 +133,9 @@ async def run(key, method, format, **kwargs):
                 async with aiohttp.ClientSession() as session:
                     async with session.get(kwargs["url"]) as audio:
                         while True:
+                            if threading.current_thread().stopped(): 
+                                print("----------------- Called stopped -----------------")
+                                raise Exception("Ending...")
                             remote_url_data = await audio.content.readany()
                             await ws.send(remote_url_data)
 
@@ -136,6 +154,10 @@ async def run(key, method, format, **kwargs):
 
                 try:
                     while len(data):
+                        if threading.current_thread().stopped(): 
+                            print("----------------- Called stopped -----------------")
+                            ws.close()
+                            raise Exception("Ending...")
                         chunk, data = data[:chunk_size], data[chunk_size:]
                         # Mimic real-time by waiting `REALTIME_RESOLUTION` seconds
                         # before the next packet.
@@ -172,6 +194,10 @@ async def run(key, method, format, **kwargs):
                     first_message = False
                 try:
                     # handle local server messages
+                    if threading.current_thread().stopped(): 
+                        print("----------------- Called stopped -----------------")
+                        ws.close()
+                        raise Exception("Ending...")
                     if res.get("msg"):
                         print(res["msg"])
                     if res.get("is_final"):
@@ -267,6 +293,9 @@ async def run(key, method, format, **kwargs):
             while stream.is_active():
             # for i in range(0, int(RATE / CHUNK * 2)):
                 await asyncio.sleep(0.1)
+                if threading.current_thread().stopped(): 
+                    print("----------------- Called stopped -----------------")
+                    raise Exception("Ending...")
                 # data = stream.read(CHUNK)
                 # audio_queue.put_nowait(data)
             #     pass
@@ -283,6 +312,10 @@ async def run(key, method, format, **kwargs):
             functions.append(asyncio.ensure_future(microphone()))
 
         await asyncio.gather(*functions)
+        
+        if threading.current_thread().stopped(): 
+            print("----------------- Called stopped -----------------")
+            raise Exception("Ending...")
 
 
 def validate_input(input):
@@ -392,17 +425,24 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
+def main(args):
     """Entrypoint for the example."""
     # Parse the command-line arguments.
-    args = parse_args()
+    # args = parse_args()
     input = args.input
     format = args.format.lower()
     host = args.host
 
     try:
         if input.lower().startswith("mic"):
-            asyncio.run(run(args.key, "mic", format, model=args.model, tier=args.tier, host=host, timestamps=args.timestamps))
+            main_coroutine = asyncio.run(run(args.key, "mic", format, model=args.model, tier=args.tier, host=host, timestamps=args.timestamps))
+            if threading.current_thread().stopped(): 
+                try:
+                    print("----------------- Called stopped -----------------")
+                    main_coroutine.stop()
+                    return
+                except RuntimeError:
+                    return
 
         elif input.lower().endswith("wav"):
             if os.path.exists(input):
@@ -418,7 +458,7 @@ def main():
                     ) = fh.getparams()
                     assert sample_width == 2, "WAV data must be 16-bit."
                     data = fh.readframes(num_samples)
-                    asyncio.run(
+                    main_coroutine = asyncio.run(
                         run(
                             args.key,
                             "wav",
@@ -434,19 +474,31 @@ def main():
                             timestamps=args.timestamps,
                         )
                     )
+                    if threading.current_thread().stopped(): 
+                        try:
+                            print("----------------- Called stopped -----------------")
+                            main_coroutine.stop()
+                            return
+                        except RuntimeError:
+                            return
             else:
                 raise argparse.ArgumentTypeError(
                     f"🔴 {args.input} is not a valid WAV file."
                 )
 
         elif input.lower().startswith("http"):
-            asyncio.run(run(args.key, "url", format, model=args.model, tier=args.tier, url=input, host=host, timestamps=args.timestamps))
-
+            main_coroutine = asyncio.run(run(args.key, "url", format, model=args.model, tier=args.tier, url=input, host=host, timestamps=args.timestamps))
+            if threading.current_thread().stopped(): 
+                        try:
+                            print("----------------- Called stopped -----------------")
+                            main_coroutine.stop()
+                            return
+                        except RuntimeError:
+                            return
         else:
             raise argparse.ArgumentTypeError(
                 f'🔴 {input} is an invalid input. Please enter the path to a WAV file, a valid stream URL, or "mic" to stream from your microphone.'
             )
-
     except websockets.exceptions.InvalidStatusCode as e:
         print(f'🔴 ERROR: Could not connect to Deepgram! {e.headers.get("dg-error")}')
         print(
@@ -482,5 +534,78 @@ def main():
         return
 
 
+class StoppableThread(threading.Thread):
+    """Thread class with a stop() method. The thread itself has to check
+    regularly for the stopped() condition."""
+
+    def __init__(self,  *args, **kwargs):
+        super(StoppableThread, self).__init__(*args, **kwargs)
+        self._stop_event = threading.Event()
+
+    def stop(self):
+        self._stop_event.set()
+
+    def stopped(self):
+        return self._stop_event.is_set()
+
+def formThread():
+    t = StoppableThread(target=main, args=(args,))
+    # add_script_run_ctx(t)
+    t.start()
+def stopThread():
+    for t in threading.enumerate():
+        if hasattr(t, "stop"):
+            t.stop()
+            t.join()
+    return
+
 if __name__ == "__main__":
-    sys.exit(main() or 0)
+    # sys.exit(main() or 0)
+    try:
+        args = parse_args()
+        button_stop = False
+        # button_live = st.button('Live Audio', use_container_width=True)
+        col1, col2 = st.columns([1,1])
+        with col2:
+            if st.button('Stop'): button_stop = True
+        with col1:
+            if st.button('Live Audio', use_container_width=True):
+                # t = StoppableThread(target=main, args=(args,))
+                # threads.append(t)
+                formThread()
+                tsc_placeholder = st.empty()
+                while not button_stop:
+                    tsc_placeholder.write(all_transcripts[-1])
+                    time.sleep(0.3)
+            if button_stop:
+                print("\033[93m"+"INFO: Calling stop on thread")
+                stopThread()
+            upload_btn = st.button('Upload File', use_container_width=True)
+            if "upload_btn_state" not in st.session_state:
+                st.session_state.upload_btn_state = False
+                
+            if upload_btn or st.session_state.upload_btn_state:
+                st.session_state.upload_btn_state = True 
+                uploaded_file = st.file_uploader("Choose and audio file", type=['wav', 'wave', 'mp3'], accept_multiple_files=False)
+                # print(uploaded_file.name)
+                if uploaded_file is not None:
+                    if not os.path.exists("tempDir"): os.mkdir("tempDir")
+                    save_pth = f"tempDir/{uploaded_file.name}"
+                    with open(save_pth, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    print("FILE: ",save_pth)
+                    args.input = save_pth
+                    formThread()
+                    tsc_placeholder = st.empty()
+                    while not button_stop:
+                        tsc_placeholder.write(all_transcripts[-1])
+                        time.sleep(0.3)
+            if button_stop:
+                print("\033[93m"+"INFO: Calling stop on thread")
+                stopThread()
+                
+    except Exception as e:
+        print(f"Exception: {e}")
+        stopThread()
+    except KeyboardInterrupt:
+        sys.exit(0)
