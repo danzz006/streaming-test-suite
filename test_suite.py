@@ -12,6 +12,8 @@ import time
 import threading
 from threading import Thread
 from datetime import datetime
+import streamlit_scrollable_textbox as stx
+from streamlit.components.v1 import html
 try:
     # Streamlit >= 1.12.0
     from streamlit.runtime.scriptrunner import add_script_run_ctx
@@ -26,7 +28,7 @@ startTime = datetime.now()
 
 all_mic_data = []
 all_transcripts = ['starting...']
-threads = []
+__STATUS__ = False
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 16000
@@ -104,6 +106,7 @@ async def run(key, method, format, **kwargs):
         print("🟢 (1/5) Successfully opened Deepgram streaming connection")
 
         async def sender(ws):
+            global __STATUS__
             print(
                 f'🟢 (2/5) Ready to stream {method if (method == "mic" or method == "url") else kwargs["filepath"]} audio to Deepgram{". Speak into your microphone to transcribe." if method == "mic" else ""}'
             )
@@ -113,7 +116,11 @@ async def run(key, method, format, **kwargs):
                     while True:
                         if threading.current_thread().stopped(): 
                             print("----------------- Called stopped -----------------")
-                            ws.close()
+                            await ws.send(json.dumps({"type": "CloseStream"}))
+                            print(
+                                "🟢 (5/5) Successfully closed Deepgram connection, waiting for final transcripts if necessary"
+                            )
+                            await ws.close()
                             raise Exception("Ending...")
                         mic_data = await audio_queue.get()
                         all_mic_data.append(mic_data)
@@ -123,7 +130,7 @@ async def run(key, method, format, **kwargs):
                     print(
                         "🟢 (5/5) Successfully closed Deepgram connection, waiting for final transcripts if necessary"
                     )
-
+                    __STATUS__ = True
                 except Exception as e:
                     print(f"Error while sending: {str(e)}")
                     raise
@@ -135,6 +142,11 @@ async def run(key, method, format, **kwargs):
                         while True:
                             if threading.current_thread().stopped(): 
                                 print("----------------- Called stopped -----------------")
+                                await ws.send(json.dumps({"type": "CloseStream"}))
+                                print(
+                                    "🟢 (5/5) Successfully closed Deepgram connection, waiting for final transcripts if necessary"
+                                )
+                                await ws.close()
                                 raise Exception("Ending...")
                             remote_url_data = await audio.content.readany()
                             await ws.send(remote_url_data)
@@ -156,7 +168,11 @@ async def run(key, method, format, **kwargs):
                     while len(data):
                         if threading.current_thread().stopped(): 
                             print("----------------- Called stopped -----------------")
-                            ws.close()
+                            await ws.send(json.dumps({"type": "CloseStream"}))
+                            print(
+                                "🟢 (5/5) Successfully closed Deepgram connection, waiting for final transcripts if necessary"
+                            )
+                            await ws.close()
                             raise Exception("Ending...")
                         chunk, data = data[:chunk_size], data[chunk_size:]
                         # Mimic real-time by waiting `REALTIME_RESOLUTION` seconds
@@ -169,6 +185,7 @@ async def run(key, method, format, **kwargs):
                     print(
                         "🟢 (5/5) Successfully closed Deepgram connection, waiting for final transcripts if necessary"
                     )
+                    __STATUS__ = True
                 except Exception as e:
                     print(f"🔴 ERROR: Something happened while sending, {e}")
                     raise e
@@ -180,6 +197,7 @@ async def run(key, method, format, **kwargs):
             return (input_data, pyaudio.paContinue)
         
         async def receiver(ws):
+            global __STATUS__
             """Print out the messages received from the server."""
             first_message = True
             first_transcript = True
@@ -196,7 +214,11 @@ async def run(key, method, format, **kwargs):
                     # handle local server messages
                     if threading.current_thread().stopped(): 
                         print("----------------- Called stopped -----------------")
-                        ws.close()
+                        await ws.send(json.dumps({"type": "CloseStream"}))
+                        print(
+                            "🟢 (5/5) Successfully closed Deepgram connection, waiting for final transcripts if necessary"
+                        )
+                        await ws.close()
                         raise Exception("Ending...")
                     if res.get("msg"):
                         print(res["msg"])
@@ -229,6 +251,7 @@ async def run(key, method, format, **kwargs):
                             print(
                                 "🟢 (5/5) Successfully closed Deepgram connection, waiting for final transcripts if necessary"
                             )
+                            __STATUS__ = True
 
                     # handle end of stream
                     if res.get("created"):
@@ -270,6 +293,7 @@ async def run(key, method, format, **kwargs):
                         print(
                             f'🟢 Request finished with a duration of {res["duration"]} seconds. Exiting!'
                         )
+                        __STATUS__ = True
                 except KeyError:
                     print(f"🔴 ERROR: Received unexpected API response! {msg}")
 
@@ -575,7 +599,7 @@ if __name__ == "__main__":
                 formThread()
                 tsc_placeholder = st.empty()
                 while not button_stop:
-                    tsc_placeholder.write(all_transcripts[-1])
+                    tsc_placeholder.write(''.join(all_transcripts[-len(all_transcripts)//3:]))
                     time.sleep(0.3)
             if button_stop:
                 print("\033[93m"+"INFO: Calling stop on thread")
@@ -597,11 +621,15 @@ if __name__ == "__main__":
                     args.input = save_pth
                     formThread()
                     tsc_placeholder = st.empty()
-                    while not button_stop:
-                        tsc_placeholder.write(all_transcripts[-1])
-                        time.sleep(0.3)
+                    # while not button_stop:
+                    #     tsc_placeholder.write(all_transcripts[-1])
+                    #     time.sleep(0.3)
+                    with st.spinner('Generating Transcriptions...'):
+                        while not __STATUS__: pass
+                    st.markdown(''.join(all_transcripts))
             if button_stop:
                 print("\033[93m"+"INFO: Calling stop on thread")
+                __STATUS__ = True
                 stopThread()
                 
     except Exception as e:

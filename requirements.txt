@@ -2,3 +2,6 @@ aiohttp==3.7.4.post0
 PyAudio==0.2.13
 pydub==0.25.1
 websockets==10.3
+streamlit==1.25.0
+deepgram-sdk==2.11.0
+streamlit-scrollable-textbox==0.0.3
