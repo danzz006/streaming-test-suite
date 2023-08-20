@@ -1,4 +1,4 @@
-import pyaudio
+# import pyaudio
 import argparse
 import asyncio
 import aiohttp
@@ -29,7 +29,7 @@ startTime = datetime.now()
 all_mic_data = []
 all_transcripts = ['starting...']
 __STATUS__ = False
-FORMAT = pyaudio.paInt16
+# FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 16000
 CHUNK = 8000
@@ -594,16 +594,17 @@ if __name__ == "__main__":
             if st.button('Stop'): button_stop = True
         with col1:
             if st.button('Live Audio', use_container_width=True):
-                # t = StoppableThread(target=main, args=(args,))
-                # threads.append(t)
-                formThread()
-                tsc_placeholder = st.empty()
-                while not button_stop:
-                    tsc_placeholder.write(''.join(all_transcripts[-len(all_transcripts)//3:]))
-                    time.sleep(0.3)
-            if button_stop:
-                print("\033[93m"+"INFO: Calling stop on thread")
-                stopThread()
+                pass
+            #     # t = StoppableThread(target=main, args=(args,))
+            #     # threads.append(t)
+            #     formThread()
+            #     tsc_placeholder = st.empty()
+            #     while not button_stop:
+            #         tsc_placeholder.write(''.join(all_transcripts[-len(all_transcripts)//3:]))
+            #         time.sleep(0.3)
+            # if button_stop:
+            #     print("\033[93m"+"INFO: Calling stop on thread")
+            #     stopThread()
             upload_btn = st.button('Upload File', use_container_width=True)
             if "upload_btn_state" not in st.session_state:
                 st.session_state.upload_btn_state = False
